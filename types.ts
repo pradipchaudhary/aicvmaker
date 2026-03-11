@@ -39,8 +39,11 @@ export interface CVData extends PassportData {
   experienceCountry: string;
   height: string;
   weight: string;
+  maritalStatus: string;
+  religion: string;
+  fatherName: string;
   languages: string;
-  template: 'elegant' | 'professional' | 'classic';
+  template: 'elegant' | 'professional' | 'classic' | 'modern_classic' | 'minimalist';
   education: Education[];
   experiences: Experience[];
   profilePhoto?: string;

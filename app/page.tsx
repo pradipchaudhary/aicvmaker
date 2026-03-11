@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useDropzone } from 'react-dropzone';
 import {
   Upload,
@@ -18,14 +18,13 @@ import {
   Image as ImageIcon,
   Award
 } from 'lucide-react';
-// import { motion, AnimatePresence } from 'motion/react';
+import { downloadCVPdf, getCVFilename } from '../lib/pdf';
+import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { CVData, AppStep, Education, Experience } from '../types';
-// import { extractPassportData } from '../services/gemini';
+import { CVData, AppStep, Education, Experience } from '@/types';
+import { extractPassportData } from '../services/gemini';
 import { ThemeToggle } from '@/components/theme-toggle';
-import { extractPassportData } from '@/services/gemini';
-import { AnimatePresence, motion } from 'framer-motion';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -50,6 +49,9 @@ const INITIAL_DATA: CVData = {
   experienceCountry: 'Nepal',
   height: '5’6”',
   weight: '72KG',
+  maritalStatus: 'Single',
+  religion: 'Hinduism',
+  fatherName: '',
   languages: 'Nepali, English, Hindi',
   template: 'classic',
   education: [],
@@ -62,65 +64,31 @@ export default function Home() {
   const [data, setData] = useState<CVData>(INITIAL_DATA);
   const [error, setError] = useState<string | null>(null);
   const [isMounted, setIsMounted] = useState(false);
-  const [cvCount, setCvCount] = useState<number | null>(null);
-  const [recentCvs, setRecentCvs] = useState<any[]>([]);
-  const [isSaving, setIsSaving] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const cvRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setIsMounted(true);
-    fetchCvData();
   }, []);
 
-  const fetchCvData = async () => {
-    try {
-      const res = await fetch('/api/cvs');
-      if (res.ok) {
-        const result = await res.json();
-        setCvCount(result.count);
-        setRecentCvs(result.recent || []);
-      }
-    } catch (err) {
-      console.error('Failed to fetch CV data:', err);
-    }
-  };
+  const handleDownload = useCallback(async () => {
+    if (!cvRef.current || isGenerating) return;
 
-  const saveCvData = async () => {
-    setIsSaving(true);
-    setError(null);
-    try {
-      const res = await fetch('/api/cvs', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(data),
-      });
+    const filename = getCVFilename(data);
 
-      const result = await res.json();
-      if (res.ok) {
-        fetchCvData(); // Refresh count and recent list
-        setStep('preview');
-      } else {
-        setError(result.error || 'Failed to save CV. Please check your database connection.');
-      }
+    setIsGenerating(true);
+    try {
+      await downloadCVPdf(cvRef.current, filename);
     } catch (err) {
-      console.error('Failed to save CV data:', err);
-      setError('Connection error. Please ensure MONGODB_URI is set in your environment.');
+      const errorMsg = err instanceof Error ? err.message : 'Failed to generate PDF';
+      console.error('PDF Generation Error:', err);
+      setError(errorMsg);
+      // Clear error after 5 seconds
+      setTimeout(() => setError(null), 5000);
     } finally {
-      setIsSaving(false);
+      setIsGenerating(false);
     }
-  };
-
-  const loadPreviousCv = (cv: any) => {
-    try {
-      const parsedData = JSON.parse(cv.fullData);
-      setData(parsedData);
-      setStep('edit-data');
-    } catch (err) {
-      console.error('Failed to parse CV data:', err);
-      setError('Failed to load this CV.');
-    }
-  };
+  }, [data, isGenerating]);
 
   const handlePassportUpload = async (file: File) => {
     setStep('extracting');
@@ -132,7 +100,7 @@ export default function Home() {
         const base64 = reader.result as string;
         try {
           const extracted = await extractPassportData(base64);
-          setData(prev => ({
+          setData((prev: CVData) => ({
             ...prev,
             ...extracted,
             passportImage: base64
@@ -153,11 +121,11 @@ export default function Home() {
 
   const addEducation = () => {
     const newEdu: Education = { id: Math.random().toString(36).substr(2, 9), degree: '', institution: '', year: '' };
-    setData(prev => ({ ...prev, education: [...prev.education, newEdu] }));
+    setData((prev: CVData) => ({ ...prev, education: [...prev.education, newEdu] }));
   };
 
   const removeEducation = (id: string) => {
-    setData(prev => ({ ...prev, education: prev.education.filter(e => e.id !== id) }));
+    setData((prev: CVData) => ({ ...prev, education: prev.education.filter((e: Education) => e.id !== id) }));
   };
 
   const addExperience = () => {
@@ -168,26 +136,26 @@ export default function Home() {
       duration: '',
       country: 'Nepal'
     };
-    setData(prev => ({ ...prev, experiences: [...prev.experiences, newExp] }));
+    setData((prev: CVData) => ({ ...prev, experiences: [...prev.experiences, newExp] }));
   };
 
   const removeExperience = (id: string) => {
-    setData(prev => ({ ...prev, experiences: prev.experiences.filter(e => e.id !== id) }));
+    setData((prev: CVData) => ({ ...prev, experiences: prev.experiences.filter((e: Experience) => e.id !== id) }));
   };
 
   const handlePhotoUpload = (file: File) => {
     const reader = new FileReader();
     reader.onload = () => {
-      setData(prev => ({ ...prev, profilePhoto: reader.result as string }));
+      setData((prev: CVData) => ({ ...prev, profilePhoto: reader.result as string }));
     };
     reader.readAsDataURL(file);
   };
 
   const handleCertificateUpload = (files: File[]) => {
-    files.forEach(file => {
+    files.forEach((file: File) => {
       const reader = new FileReader();
       reader.onload = () => {
-        setData(prev => ({
+        setData((prev: CVData) => ({
           ...prev,
           certificates: [...prev.certificates, {
             id: Math.random().toString(36).substr(2, 9),
@@ -213,11 +181,6 @@ export default function Home() {
             </div>
             <div>
               <h1 className="text-xl font-semibold tracking-tight">Nepal CV Maker</h1>
-              {cvCount !== null && (
-                <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
-                  {cvCount} CVs Created So Far
-                </p>
-              )}
             </div>
           </div>
           <ThemeToggle />
@@ -262,37 +225,6 @@ export default function Home() {
               >
                 Skip and fill manually
               </button>
-
-              {recentCvs.length > 0 && (
-                <div className="mt-16 text-left">
-                  <h3 className="text-xl font-serif italic mb-6 flex items-center gap-2">
-                    <FileText size={20} className="text-primary" /> Recently Created CVs
-                  </h3>
-                  <div className="grid grid-cols-1 gap-4">
-                    {recentCvs.map((cv) => (
-                      <button
-                        key={cv._id}
-                        onClick={() => loadPreviousCv(cv)}
-                        className="flex items-center justify-between p-4 bg-card border border-border rounded-2xl hover:border-primary/50 hover:bg-primary/5 transition-all group"
-                      >
-                        <div className="flex items-center gap-4">
-                          <div className="w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center text-primary">
-                            <User size={18} />
-                          </div>
-                          <div className="text-left">
-                            <p className="font-bold text-sm">{cv.fullName}</p>
-                            <p className="text-xs text-muted-foreground">{cv.applyingFor} • {cv.passportNumber}</p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 text-primary opacity-0 group-hover:opacity-100 transition-opacity">
-                          <span className="text-xs font-bold uppercase tracking-wider">Edit CV</span>
-                          <ChevronRight size={16} />
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
             </motion.div>
           )}
 
@@ -394,7 +326,7 @@ export default function Home() {
                 </Section>
 
                 <Section title="CV Template" icon={<ImageIcon size={18} />}>
-                  <div className="grid grid-cols-3 gap-6">
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                     <button
                       onClick={() => setData({ ...data, template: 'elegant' })}
                       className="group text-left"
@@ -402,10 +334,10 @@ export default function Home() {
                       <TemplatePreview type="elegant" active={data.template === 'elegant'} />
                       <div className="px-1">
                         <div className={cn(
-                          "font-bold text-sm mb-0.5 transition-colors",
+                          "font-bold text-[10px] mb-0.5 transition-colors",
                           data.template === 'elegant' ? "text-primary" : "text-foreground"
                         )}>Elegant</div>
-                        <div className="text-[10px] text-muted-foreground uppercase tracking-wider">Serif / Two-Column</div>
+                        <div className="text-[8px] text-muted-foreground uppercase tracking-wider">Serif / 2-Col</div>
                       </div>
                     </button>
                     <button
@@ -415,10 +347,10 @@ export default function Home() {
                       <TemplatePreview type="professional" active={data.template === 'professional'} />
                       <div className="px-1">
                         <div className={cn(
-                          "font-bold text-sm mb-0.5 transition-colors",
+                          "font-bold text-[10px] mb-0.5 transition-colors",
                           data.template === 'professional' ? "text-primary" : "text-foreground"
                         )}>Professional</div>
-                        <div className="text-[10px] text-muted-foreground uppercase tracking-wider">Modern / Dark Header</div>
+                        <div className="text-[8px] text-muted-foreground uppercase tracking-wider">Modern / Dark</div>
                       </div>
                     </button>
                     <button
@@ -428,10 +360,36 @@ export default function Home() {
                       <TemplatePreview type="classic" active={data.template === 'classic'} />
                       <div className="px-1">
                         <div className={cn(
-                          "font-bold text-sm mb-0.5 transition-colors",
+                          "font-bold text-[10px] mb-0.5 transition-colors",
                           data.template === 'classic' ? "text-primary" : "text-foreground"
                         )}>Classic</div>
-                        <div className="text-[10px] text-muted-foreground uppercase tracking-wider">Formal / Centered</div>
+                        <div className="text-[8px] text-muted-foreground uppercase tracking-wider">Formal / Center</div>
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => setData({ ...data, template: 'modern_classic' })}
+                      className="group text-left"
+                    >
+                      <TemplatePreview type="modern_classic" active={data.template === 'modern_classic'} />
+                      <div className="px-1">
+                        <div className={cn(
+                          "font-bold text-[10px] mb-0.5 transition-colors",
+                          data.template === 'modern_classic' ? "text-primary" : "text-foreground"
+                        )}>Modern Classic</div>
+                        <div className="text-[8px] text-muted-foreground uppercase tracking-wider">Clean / Sidebar</div>
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => setData({ ...data, template: 'minimalist' })}
+                      className="group text-left"
+                    >
+                      <TemplatePreview type="minimalist" active={data.template === 'minimalist'} />
+                      <div className="px-1">
+                        <div className={cn(
+                          "font-bold text-[10px] mb-0.5 transition-colors",
+                          data.template === 'minimalist' ? "text-primary" : "text-foreground"
+                        )}>Minimalist</div>
+                        <div className="text-[8px] text-muted-foreground uppercase tracking-wider">Simple / 1-Col</div>
                       </div>
                     </button>
                   </div>
@@ -441,6 +399,22 @@ export default function Home() {
                   <div className="grid grid-cols-2 gap-4">
                     <Input label="Height" value={data.height} onChange={v => setData({ ...data, height: v })} />
                     <Input label="Weight" value={data.weight} onChange={v => setData({ ...data, weight: v })} />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4 mt-4">
+                    <Select
+                      label="Marital Status"
+                      value={data.maritalStatus}
+                      onChange={v => setData({ ...data, maritalStatus: v })}
+                      options={[
+                        { label: 'Single', value: 'Single' },
+                        { label: 'Married', value: 'Married' },
+                        { label: 'Divorced', value: 'Divorced' },
+                      ]}
+                    />
+                    <Input label="Religion" value={data.religion} onChange={v => setData({ ...data, religion: v })} />
+                  </div>
+                  <div className="mt-4">
+                    <Input label="Father's Name" value={data.fatherName} onChange={v => setData({ ...data, fatherName: v })} />
                   </div>
                 </Section>
 
@@ -478,7 +452,7 @@ export default function Home() {
                   </button>
                 </div>
                 <div className="space-y-4">
-                  {data.education.map((edu, idx) => (
+                  {data.education.map((edu: Education, idx: number) => (
                     <div key={edu.id} className="grid grid-cols-1 md:grid-cols-4 gap-4 bg-card p-6 rounded-2xl shadow-sm relative group border border-border">
                       <Input label="Degree" value={edu.degree} onChange={v => {
                         const newEdu = [...data.education];
@@ -521,7 +495,7 @@ export default function Home() {
                   </button>
                 </div>
                 <div className="space-y-4">
-                  {data.experiences.map((exp, idx) => (
+                  {data.experiences.map((exp: Experience, idx: number) => (
                     <div key={exp.id} className="grid grid-cols-1 md:grid-cols-4 gap-4 bg-card p-6 rounded-2xl shadow-sm relative group border border-border">
                       <Input label="Job Title" value={exp.title} onChange={v => {
                         const newExp = [...data.experiences];
@@ -588,11 +562,9 @@ export default function Home() {
                   <p className="text-muted-foreground">Upload your profile photo and any relevant certificates.</p>
                 </div>
                 <button
-                  onClick={saveCvData}
-                  disabled={isSaving}
+                  onClick={() => setStep('preview')}
                   className="bg-primary text-primary-foreground px-6 py-3 rounded-full font-medium flex items-center gap-2 hover:bg-primary/90 transition-all disabled:opacity-50"
                 >
-                  {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                   Generate CV <ChevronRight size={18} />
                 </button>
               </div>
@@ -605,9 +577,6 @@ export default function Home() {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
                 <div className="space-y-6">
-                  <h3 className="text-xl font-medium flex items-center gap-2">
-                    <User size={20} className="text-primary" /> Profile Photo
-                  </h3>
                   {data.profilePhoto ? (
                     <div className="relative w-48 h-48 mx-auto group">
                       <img src={data.profilePhoto} alt="Profile" className="w-full h-full object-cover rounded-3xl shadow-lg" referrerPolicy="no-referrer" />
@@ -630,9 +599,6 @@ export default function Home() {
                 </div>
 
                 <div className="space-y-6">
-                  <h3 className="text-xl font-medium flex items-center gap-2">
-                    <Award size={20} className="text-primary" /> Certificates
-                  </h3>
                   <Dropzone
                     onDrop={handleCertificateUpload}
                     accept={{ 'image/*': ['.jpeg', '.jpg', '.png'], 'application/pdf': ['.pdf'] }}
@@ -641,11 +607,11 @@ export default function Home() {
                     subtitle="Upload multiple images or PDFs"
                   />
                   <div className="grid grid-cols-2 gap-4 mt-4">
-                    {data.certificates.map(cert => (
+                    {data.certificates.map((cert: { id: string; url: string; name: string }) => (
                       <div key={cert.id} className="bg-card p-3 rounded-xl border border-border flex items-center justify-between group">
                         <span className="text-xs truncate max-w-[120px]">{cert.name}</span>
                         <button
-                          onClick={() => setData({ ...data, certificates: data.certificates.filter(c => c.id !== cert.id) })}
+                          onClick={() => setData({ ...data, certificates: data.certificates.filter((c: { id: string; url: string; name: string }) => c.id !== cert.id) })}
                           className="text-red-500 p-1 hover:bg-red-500/10 rounded"
                         >
                           <Trash2 size={14} />
@@ -667,11 +633,9 @@ export default function Home() {
                   <ChevronLeft size={18} /> Back to Details
                 </button>
                 <button
-                  onClick={saveCvData}
-                  disabled={isSaving}
+                  onClick={() => setStep('preview')}
                   className="bg-primary text-primary-foreground px-8 py-4 rounded-full font-medium flex items-center gap-2 hover:bg-primary/90 shadow-xl shadow-primary/20 transition-all disabled:opacity-50"
                 >
-                  {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : null}
                   Generate Final CV <ChevronRight size={18} />
                 </button>
               </div>
@@ -695,280 +659,553 @@ export default function Home() {
                     <ChevronLeft size={18} /> Edit Documents
                   </button>
                   <button
-                    onClick={() => {
-                      setTimeout(() => window.print(), 100);
-                    }}
-                    className="bg-primary text-primary-foreground px-6 py-3 rounded-full font-medium flex items-center gap-2 hover:bg-primary/90 shadow-lg transition-all"
+                    onClick={handleDownload}
+                    disabled={isGenerating}
+                    className="bg-primary text-primary-foreground px-6 py-3 rounded-full font-medium flex items-center gap-2 hover:bg-primary/90 shadow-lg transition-all disabled:opacity-70 disabled:cursor-not-allowed"
                   >
-                    <Download size={18} /> Print / Save PDF
+                    {isGenerating ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
+                    {isGenerating ? 'Generating PDF...' : 'Save PDF'}
                   </button>
                 </div>
               </div>
 
-              <div className="space-y-12 print:space-y-0">
+              <div ref={cvRef} className="space-y-12 print:space-y-0 print:bg-white">
                 {/* Page 1: CV */}
                 {data.template === 'elegant' ? (
-                  <div className="bg-white text-black shadow-2xl rounded-[2rem] overflow-hidden max-w-[210mm] mx-auto min-h-[297mm] p-12 print:shadow-none print:rounded-none print:p-8">
+                  <div className="bg-white text-black shadow-2xl rounded-[2rem] overflow-hidden max-w-[210mm] mx-auto min-h-[297mm] p-12 print:shadow-none print:rounded-none print:p-12 print:m-0">
                     <div className="grid grid-cols-3 gap-12">
-                      <div className="col-span-1 space-y-8">
+                      <div className="col-span-1 space-y-10">
                         {data.profilePhoto && (
-                          <img src={data.profilePhoto} alt="Profile" className="w-full aspect-square object-cover rounded-3xl shadow-md" referrerPolicy="no-referrer" />
+                          <div className="relative">
+                            <div className="absolute -inset-2 border-2 border-[#5A5A40]/20 rounded-[2.5rem] rotate-3"></div>
+                            <img src={data.profilePhoto} alt="Profile" className="relative w-full aspect-[4/5] object-cover rounded-[2rem] shadow-xl border-4 border-white" referrerPolicy="no-referrer" />
+                          </div>
                         )}
 
                         <div className="space-y-6">
-                          <h4 className="text-xs font-bold uppercase tracking-widest text-[#5A5A40]">Contact</h4>
-                          <div className="space-y-3 text-sm text-black/70">
-                            <p className="flex items-center gap-2"><User size={14} /> {data.phone}</p>
-                            <p className="flex items-center gap-2"><FileText size={14} /> {data.email}</p>
-                            <p className="flex items-center gap-2"><Briefcase size={14} /> {data.address}</p>
+                          <div className="flex items-center gap-3">
+                            <div className="h-px flex-1 bg-[#5A5A40]/20"></div>
+                            <h4 className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#5A5A40]">Contact</h4>
+                            <div className="h-px flex-1 bg-[#5A5A40]/20"></div>
+                          </div>
+                          <div className="space-y-4 text-sm text-black/80">
+                            <p className="flex items-center gap-3"><User size={16} className="text-[#5A5A40]" /> {data.phone}</p>
+                            <p className="flex items-center gap-3"><FileText size={16} className="text-[#5A5A40]" /> {data.email}</p>
+                            <p className="flex items-center gap-3"><Briefcase size={16} className="text-[#5A5A40]" /> {data.address}</p>
                           </div>
                         </div>
 
                         <div className="space-y-6">
-                          <h4 className="text-xs font-bold uppercase tracking-widest text-[#5A5A40]">Passport Info</h4>
-                          <div className="space-y-2 text-sm text-black/70">
-                            <p><span className="font-medium">Number:</span> {data.passportNumber}</p>
-                            <p><span className="font-medium">Nationality:</span> {data.nationality}</p>
-                            <p><span className="font-medium">DOB:</span> {data.dateOfBirth}</p>
-                            <p><span className="font-medium">Gender:</span> {data.gender}</p>
+                          <div className="flex items-center gap-3">
+                            <div className="h-px flex-1 bg-[#5A5A40]/20"></div>
+                            <h4 className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#5A5A40]">Passport</h4>
+                            <div className="h-px flex-1 bg-[#5A5A40]/20"></div>
+                          </div>
+                          <div className="space-y-3 text-sm text-black/80">
+                            <div className="flex justify-between"><span>No:</span> <span className="font-bold">{data.passportNumber}</span></div>
+                            <div className="flex justify-between"><span>Nationality:</span> <span className="font-bold">{data.nationality}</span></div>
+                            <div className="flex justify-between"><span>DOB:</span> <span className="font-bold">{data.dateOfBirth}</span></div>
+                            <div className="flex justify-between"><span>Gender:</span> <span className="font-bold">{data.gender}</span></div>
+                            <div className="flex justify-between"><span>Marital:</span> <span className="font-bold">{data.maritalStatus}</span></div>
+                            <div className="flex justify-between"><span>Religion:</span> <span className="font-bold">{data.religion}</span></div>
                           </div>
                         </div>
 
                         <div className="space-y-6">
-                          <h4 className="text-xs font-bold uppercase tracking-widest text-[#5A5A40]">Experience Summary</h4>
-                          <div className="space-y-2 text-sm text-black/70 italic">
-                            <p>
-                              Worked as a {data.applyingFor} for {data.experienceYears.padStart(2, '0')} years in {data.experienceCountry} .
-                            </p>
+                          <div className="flex items-center gap-3">
+                            <div className="h-px flex-1 bg-[#5A5A40]/20"></div>
+                            <h4 className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#5A5A40]">Summary</h4>
+                            <div className="h-px flex-1 bg-[#5A5A40]/20"></div>
                           </div>
-                        </div>
-
-                        <div className="space-y-6">
-                          <h4 className="text-xs font-bold uppercase tracking-widest text-[#5A5A40]">Education Level</h4>
-                          <div className="space-y-2 text-sm text-black/70 font-medium">
-                            <p>{data.educationLevel}</p>
-                          </div>
+                          <p className="text-sm text-black/70 italic leading-relaxed">
+                            Experienced {data.applyingFor} with {data.experienceYears} years of professional background in {data.experienceCountry}.
+                          </p>
                         </div>
                       </div>
 
-                      <div className="col-span-2 space-y-12">
-                        <div>
-                          <h1 className="text-5xl font-serif italic mb-4">{data.fullName}</h1>
-                          <div className="h-1 w-24 bg-[#5A5A40]"></div>
+                      <div className="col-span-2 space-y-16">
+                        <div className="relative">
+                          <h1 className="text-6xl font-serif italic mb-2 tracking-tight">{data.fullName}</h1>
+                          <p className="text-[#5A5A40] font-medium tracking-[0.3em] uppercase text-xs mb-6">Professional {data.applyingFor}</p>
+                          <div className="h-1.5 w-32 bg-[#5A5A40] rounded-full"></div>
                         </div>
 
-                        <div className="space-y-8">
-                          <h3 className="text-2xl font-serif italic border-b border-black/5 pb-2">Work Experience</h3>
-                          <div className="space-y-8">
-                            {data.experiences.map(exp => (
-                              <div key={exp.id} className="space-y-2">
+                        <div className="space-y-10">
+                          <div className="flex items-center gap-4">
+                            <h3 className="text-2xl font-serif italic whitespace-nowrap">Work Experience</h3>
+                            <div className="h-px w-full bg-black/5"></div>
+                          </div>
+                          <div className="space-y-10">
+                            {data.experiences.map((exp: Experience) => (
+                              <div key={exp.id} className="relative pl-8 border-l-2 border-[#5A5A40]/10 space-y-2">
+                                <div className="absolute -left-2.25 top-1 w-4 h-4 rounded-full bg-white border-2 border-[#5A5A40]"></div>
                                 <div className="flex justify-between items-start">
-                                  <h4 className="font-bold text-lg">{exp.title}</h4>
-                                  <span className="text-sm text-black/40 font-medium">{exp.duration}</span>
+                                  <h4 className="font-bold text-xl tracking-tight">{exp.title}</h4>
+                                  <span className="text-xs text-[#5A5A40] font-bold uppercase tracking-widest bg-[#5A5A40]/5 px-3 py-1 rounded-full">{exp.duration}</span>
                                 </div>
-                                <p className="text-[#5A5A40] font-medium">{exp.company} — {exp.country}</p>
+                                <p className="text-[#5A5A40] font-bold text-sm uppercase tracking-wider">{exp.company} — {exp.country}</p>
                               </div>
                             ))}
-                            {data.experiences.length === 0 && <p className="text-black/40 italic">No experience listed.</p>}
+                            {data.experiences.length === 0 && <p className="text-black/30 italic">No experience listed.</p>}
                           </div>
                         </div>
 
-                        <div className="space-y-8">
-                          <h3 className="text-2xl font-serif italic border-b border-black/5 pb-2">Education</h3>
-                          <div className="space-y-6">
-                            {data.education.map(edu => (
-                              <div key={edu.id} className="space-y-1">
+                        <div className="space-y-10">
+                          <div className="flex items-center gap-4">
+                            <h3 className="text-2xl font-serif italic whitespace-nowrap">Education</h3>
+                            <div className="h-px w-full bg-black/5"></div>
+                          </div>
+                          <div className="space-y-8">
+                            {data.education.map((edu: Education) => (
+                              <div key={edu.id} className="relative pl-8 border-l-2 border-[#5A5A40]/10 space-y-1">
+                                <div className="absolute -left-2.25 top-1 w-4 h-4 rounded-full bg-white border-2 border-[#5A5A40]"></div>
                                 <div className="flex justify-between items-start">
-                                  <h4 className="font-bold text-lg">{edu.degree}</h4>
-                                  <span className="text-sm text-black/40 font-medium">{edu.year}</span>
+                                  <h4 className="font-bold text-xl tracking-tight">{edu.degree}</h4>
+                                  <span className="text-xs text-[#5A5A40] font-bold uppercase tracking-widest bg-[#5A5A40]/5 px-3 py-1 rounded-full">{edu.year}</span>
                                 </div>
-                                <p className="text-[#5A5A40] font-medium">{edu.institution}</p>
+                                <p className="text-[#5A5A40] font-bold text-sm uppercase tracking-wider">{edu.institution}</p>
                               </div>
                             ))}
-                            {data.education.length === 0 && <p className="text-black/40 italic">No education listed.</p>}
+                            <div className="relative pl-8 border-l-2 border-[#5A5A40]/10 space-y-1">
+                              <div className="absolute -left-[9px] top-1 w-4 h-4 rounded-full bg-white border-2 border-[#5A5A40]"></div>
+                              <h4 className="font-bold text-xl tracking-tight">{data.educationLevel}</h4>
+                              <p className="text-[#5A5A40] font-bold text-sm uppercase tracking-wider">Completed Secondary Education</p>
+                            </div>
                           </div>
                         </div>
                       </div>
                     </div>
                   </div>
                 ) : data.template === 'professional' ? (
-                  <div className="bg-white text-black shadow-2xl rounded-none overflow-hidden max-w-[210mm] mx-auto min-h-[297mm] flex flex-col print:shadow-none print:p-0">
+                  <div className="bg-white text-black shadow-2xl rounded-none overflow-hidden max-w-[210mm] mx-auto min-h-[297mm] flex flex-col print:shadow-none print:p-0 print:m-0">
                     {/* Professional Template Header */}
-                    <div className="bg-[#1A1A1A] text-white p-12 flex justify-between items-center">
-                      <div className="space-y-4">
-                        <h1 className="text-4xl font-bold tracking-tight uppercase">{data.fullName}</h1>
-                        <div className="flex flex-wrap gap-4 text-sm text-white/60">
-                          <p className="flex items-center gap-1"><User size={14} /> {data.phone}</p>
-                          <p className="flex items-center gap-1"><FileText size={14} /> {data.email}</p>
-                          <p className="flex items-center gap-1"><Briefcase size={14} /> {data.address}</p>
+                    <div className="bg-[#1A1A1A] text-white p-16 flex justify-between items-center relative overflow-hidden">
+                      <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -mr-32 -mt-32"></div>
+                      <div className="space-y-6 relative z-10">
+                        <h1 className="text-5xl font-bold tracking-tighter uppercase leading-none">{data.fullName}</h1>
+                        <div className="flex flex-wrap gap-6 text-xs font-bold uppercase tracking-[0.2em] text-white/50">
+                          <p className="flex items-center gap-2"><User size={14} className="text-white" /> {data.phone}</p>
+                          <p className="flex items-center gap-2"><FileText size={14} className="text-white" /> {data.email}</p>
+                          <p className="flex items-center gap-2"><Briefcase size={14} className="text-white" /> {data.address}</p>
                         </div>
                       </div>
                       {data.profilePhoto && (
-                        <img src={data.profilePhoto} alt="Profile" className="w-32 h-32 object-cover border-4 border-white/10" referrerPolicy="no-referrer" />
+                        <div className="relative z-10">
+                          <img src={data.profilePhoto} alt="Profile" className="w-40 h-40 object-cover border-8 border-white/10 grayscale hover:grayscale-0 transition-all duration-500" referrerPolicy="no-referrer" />
+                        </div>
                       )}
                     </div>
 
-                    <div className="p-12 grid grid-cols-3 gap-12 flex-1">
-                      <div className="col-span-2 space-y-12">
-                        <section className="space-y-6">
-                          <h2 className="text-xl font-bold uppercase tracking-widest border-b-2 border-black pb-2">Professional Summary</h2>
-                          <p className="text-sm text-black/70 leading-relaxed">
-                            Worked as a {data.applyingFor} for {data.experienceYears.padStart(2, '0')} years in {data.experienceCountry}.
-                            Highly motivated professional with a strong background in {data.applyingFor} duties.
-                            Committed to delivering high-quality service and maintaining professional standards.
+                    <div className="p-16 grid grid-cols-3 gap-16 flex-1">
+                      <div className="col-span-2 space-y-16">
+                        <section className="space-y-8">
+                          <h2 className="text-sm font-bold uppercase tracking-[0.3em] text-black/30 flex items-center gap-4">
+                            Summary <div className="h-px flex-1 bg-black/10"></div>
+                          </h2>
+                          <p className="text-base text-black/80 leading-relaxed font-medium">
+                            Professional {data.applyingFor} with {data.experienceYears} years of experience in {data.experienceCountry}.
+                            Specialized in operational excellence and high-standard service delivery.
+                            Proven track record of reliability and professional growth.
                           </p>
                         </section>
 
-                        <section className="space-y-6">
-                          <h2 className="text-xl font-bold uppercase tracking-widest border-b-2 border-black pb-2">Experience</h2>
-                          <div className="space-y-8">
-                            {data.experiences.map(exp => (
-                              <div key={exp.id} className="space-y-1">
+                        <section className="space-y-8">
+                          <h2 className="text-sm font-bold uppercase tracking-[0.3em] text-black/30 flex items-center gap-4">
+                            Experience <div className="h-px flex-1 bg-black/10"></div>
+                          </h2>
+                          <div className="space-y-12">
+                            {data.experiences.map((exp: Experience) => (
+                              <div key={exp.id} className="space-y-3">
                                 <div className="flex justify-between items-baseline">
-                                  <h3 className="font-bold text-lg">{exp.title}</h3>
-                                  <span className="text-sm font-medium text-black/40">{exp.duration}</span>
+                                  <h3 className="font-bold text-2xl tracking-tight">{exp.title}</h3>
+                                  <span className="text-xs font-bold text-black/30 uppercase tracking-widest">{exp.duration}</span>
                                 </div>
-                                <p className="text-sm font-bold text-black/60">{exp.company} | {exp.country}</p>
+                                <p className="text-sm font-bold text-black/60 uppercase tracking-wider">{exp.company} <span className="mx-2 text-black/20">|</span> {exp.country}</p>
                               </div>
                             ))}
-                            {data.experiences.length === 0 && <p className="text-black/40 italic">No experience listed.</p>}
+                            {data.experiences.length === 0 && <p className="text-black/30 italic">No experience listed.</p>}
                           </div>
                         </section>
 
-                        <section className="space-y-6">
-                          <h2 className="text-xl font-bold uppercase tracking-widest border-b-2 border-black pb-2">Education</h2>
-                          <div className="space-y-6">
-                            {data.education.map(edu => (
-                              <div key={edu.id} className="space-y-1">
+                        <section className="space-y-8">
+                          <h2 className="text-sm font-bold uppercase tracking-[0.3em] text-black/30 flex items-center gap-4">
+                            Education <div className="h-px flex-1 bg-black/10"></div>
+                          </h2>
+                          <div className="space-y-10">
+                            {data.education.map((edu: Education) => (
+                              <div key={edu.id} className="space-y-2">
                                 <div className="flex justify-between items-baseline">
-                                  <h3 className="font-bold text-lg">{edu.degree}</h3>
-                                  <span className="text-sm font-medium text-black/40">{edu.year}</span>
+                                  <h3 className="font-bold text-2xl tracking-tight">{edu.degree}</h3>
+                                  <span className="text-xs font-bold text-black/30 uppercase tracking-widest">{edu.year}</span>
                                 </div>
-                                <p className="text-sm font-bold text-black/60">{edu.institution}</p>
+                                <p className="text-sm font-bold text-black/60 uppercase tracking-wider">{edu.institution}</p>
                               </div>
                             ))}
-                            {data.education.length === 0 && <p className="text-black/40 italic">No education listed.</p>}
+                            <div className="space-y-2">
+                              <h3 className="font-bold text-2xl tracking-tight">{data.educationLevel}</h3>
+                              <p className="text-sm font-bold text-black/60 uppercase tracking-wider">Secondary Education Completed</p>
+                            </div>
                           </div>
                         </section>
                       </div>
 
-                      <div className="col-span-1 space-y-12 bg-black/5 p-8 -m-8 ml-0">
-                        <section className="space-y-4">
-                          <h2 className="text-sm font-bold uppercase tracking-widest text-black/40">Details</h2>
-                          <div className="space-y-3 text-sm">
-                            <div>
-                              <p className="text-black/40 font-bold uppercase text-[10px]">Nationality</p>
-                              <p className="font-medium">{data.nationality}</p>
+                      <div className="col-span-1 space-y-16">
+                        <section className="space-y-8">
+                          <h2 className="text-sm font-bold uppercase tracking-[0.3em] text-black/30">Personal</h2>
+                          <div className="space-y-6 text-sm">
+                            <div className="group">
+                              <p className="text-black/20 font-bold uppercase text-[10px] tracking-widest mb-1 group-hover:text-black transition-colors">Nationality</p>
+                              <p className="font-bold text-black/80">{data.nationality}</p>
                             </div>
-                            <div>
-                              <p className="text-black/40 font-bold uppercase text-[10px]">Passport No.</p>
-                              <p className="font-medium">{data.passportNumber}</p>
+                            <div className="group">
+                              <p className="text-black/20 font-bold uppercase text-[10px] tracking-widest mb-1 group-hover:text-black transition-colors">Passport No.</p>
+                              <p className="font-bold text-black/80">{data.passportNumber}</p>
                             </div>
-                            <div>
-                              <p className="text-black/40 font-bold uppercase text-[10px]">Date of Birth</p>
-                              <p className="font-medium">{data.dateOfBirth}</p>
+                            <div className="group">
+                              <p className="text-black/20 font-bold uppercase text-[10px] tracking-widest mb-1 group-hover:text-black transition-colors">Date of Birth</p>
+                              <p className="font-bold text-black/80">{data.dateOfBirth}</p>
                             </div>
-                            <div>
-                              <p className="text-black/40 font-bold uppercase text-[10px]">Education</p>
-                              <p className="font-medium">{data.educationLevel}</p>
+                            <div className="group">
+                              <p className="text-black/20 font-bold uppercase text-[10px] tracking-widest mb-1 group-hover:text-black transition-colors">Marital Status</p>
+                              <p className="font-bold text-black/80">{data.maritalStatus}</p>
+                            </div>
+                            <div className="group">
+                              <p className="text-black/20 font-bold uppercase text-[10px] tracking-widest mb-1 group-hover:text-black transition-colors">Religion</p>
+                              <p className="font-bold text-black/80">{data.religion}</p>
+                            </div>
+                            <div className="group">
+                              <p className="text-black/20 font-bold uppercase text-[10px] tracking-widest mb-1 group-hover:text-black transition-colors">Father&apos;s Name</p>
+                              <p className="font-bold text-black/80">{data.fatherName}</p>
                             </div>
                           </div>
                         </section>
 
-                        <section className="space-y-4">
-                          <h2 className="text-sm font-bold uppercase tracking-widest text-black/40">Skills</h2>
-                          <div className="flex flex-wrap gap-2">
-                            <span className="bg-black text-white text-[10px] px-2 py-1 uppercase font-bold tracking-tighter">{data.applyingFor} Operations</span>
-                            <span className="bg-black text-white text-[10px] px-2 py-1 uppercase font-bold tracking-tighter">Team Collaboration</span>
-                            <span className="bg-black text-white text-[10px] px-2 py-1 uppercase font-bold tracking-tighter">Time Management</span>
+                        <section className="space-y-8">
+                          <h2 className="text-sm font-bold uppercase tracking-[0.3em] text-black/30">Expertise</h2>
+                          <div className="flex flex-col gap-4">
+                            <div className="space-y-2">
+                              <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest">
+                                <span>{data.applyingFor}</span>
+                                <span>Expert</span>
+                              </div>
+                              <div className="h-1 w-full bg-black/5 rounded-full overflow-hidden">
+                                <div className="h-full w-[95%] bg-black"></div>
+                              </div>
+                            </div>
+                            <div className="space-y-2">
+                              <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest">
+                                <span>Communication</span>
+                                <span>Advanced</span>
+                              </div>
+                              <div className="h-1 w-full bg-black/5 rounded-full overflow-hidden">
+                                <div className="h-full w-[85%] bg-black"></div>
+                              </div>
+                            </div>
+                            <div className="space-y-2">
+                              <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest">
+                                <span>Teamwork</span>
+                                <span>Advanced</span>
+                              </div>
+                              <div className="h-1 w-full bg-black/5 rounded-full overflow-hidden">
+                                <div className="h-full w-[90%] bg-black"></div>
+                              </div>
+                            </div>
                           </div>
                         </section>
                       </div>
                     </div>
                   </div>
-                ) : (
-                  <div className="bg-white text-black shadow-2xl rounded-none overflow-hidden max-w-[210mm] mx-auto min-h-[297mm] p-16 print:shadow-none print:p-8">
-                    <div className="text-center space-y-1 mb-8">
-                      <h1 className="text-2xl font-bold uppercase tracking-widest">Curriculum Vitae</h1>
-                      <div className="text-xl font-bold uppercase">
-                        {data.gender.toLowerCase().includes('female') ? 'MS.' : 'MR.'}{data.fullName}
+                ) : data.template === 'modern_classic' ? (
+                  <div className="bg-white text-black shadow-2xl rounded-none overflow-hidden max-w-[210mm] mx-auto min-h-[297mm] flex flex-col print:shadow-none print:p-0 print:m-0">
+                    <div className="flex flex-1">
+                      {/* Sidebar */}
+                      <div className="w-[75mm] bg-[#F8F9FA] p-10 space-y-10 border-r border-black/5">
+                        {data.profilePhoto && (
+                          <img src={data.profilePhoto} alt="Profile" className="w-full aspect-square object-cover rounded-full border-4 border-white shadow-lg" referrerPolicy="no-referrer" />
+                        )}
+
+                        <section className="space-y-4">
+                          <h2 className="text-xs font-bold uppercase tracking-[0.2em] text-black/40 border-b border-black/10 pb-2">Contact</h2>
+                          <div className="space-y-3 text-xs">
+                            <p className="flex items-center gap-2 font-medium"><User size={12} /> {data.phone}</p>
+                            <p className="flex items-center gap-2 font-medium"><FileText size={12} /> {data.email}</p>
+                            <p className="flex items-center gap-2 font-medium"><Briefcase size={12} /> {data.address}</p>
+                          </div>
+                        </section>
+
+                        <section className="space-y-4">
+                          <h2 className="text-xs font-bold uppercase tracking-[0.2em] text-black/40 border-b border-black/10 pb-2">Personal Details</h2>
+                          <div className="space-y-3 text-xs">
+                            <div>
+                              <p className="text-[10px] text-black/30 font-bold uppercase">Nationality</p>
+                              <p className="font-bold">{data.nationality}</p>
+                            </div>
+                            <div>
+                              <p className="text-[10px] text-black/30 font-bold uppercase">Passport No.</p>
+                              <p className="font-bold">{data.passportNumber}</p>
+                            </div>
+                            <div>
+                              <p className="text-[10px] text-black/30 font-bold uppercase">Date of Birth</p>
+                              <p className="font-bold">{data.dateOfBirth}</p>
+                            </div>
+                            <div>
+                              <p className="text-[10px] text-black/30 font-bold uppercase">Marital Status</p>
+                              <p className="font-bold">{data.maritalStatus}</p>
+                            </div>
+                            <div>
+                              <p className="text-[10px] text-black/30 font-bold uppercase">Religion</p>
+                              <p className="font-bold">{data.religion}</p>
+                            </div>
+                          </div>
+                        </section>
+
+                        <section className="space-y-4">
+                          <h2 className="text-xs font-bold uppercase tracking-[0.2em] text-black/40 border-b border-black/10 pb-2">Languages</h2>
+                          <p className="text-xs font-bold">{data.languages}</p>
+                        </section>
                       </div>
-                      <p className="text-sm font-bold uppercase">ADDRESS: {data.address}</p>
+
+                      {/* Main Content */}
+                      <div className="flex-1 p-12 space-y-12">
+                        <header>
+                          <h1 className="text-4xl font-bold tracking-tight mb-1">{data.fullName}</h1>
+                          <p className="text-lg text-black/40 font-medium uppercase tracking-widest">{data.applyingFor}</p>
+                        </header>
+
+                        <section className="space-y-4">
+                          <h2 className="text-lg font-bold uppercase tracking-widest border-b-2 border-black pb-1">Profile</h2>
+                          <p className="text-sm text-black/70 leading-relaxed">
+                            Dedicated {data.applyingFor} with a proven track record of {data.experienceYears} years in {data.experienceCountry}.
+                            Highly skilled in operational tasks and committed to delivering exceptional results.
+                          </p>
+                        </section>
+
+                        <section className="space-y-6">
+                          <h2 className="text-lg font-bold uppercase tracking-widest border-b-2 border-black pb-1">Experience</h2>
+                          <div className="space-y-8">
+                            {data.experiences.map((exp: Experience) => (
+                              <div key={exp.id} className="space-y-1">
+                                <div className="flex justify-between items-baseline">
+                                  <h3 className="font-bold text-base">{exp.title}</h3>
+                                  <span className="text-xs font-bold text-black/40">{exp.duration}</span>
+                                </div>
+                                <p className="text-sm font-medium text-black/60">{exp.company} | {exp.country}</p>
+                              </div>
+                            ))}
+                            <div className="space-y-1">
+                              <div className="flex justify-between items-baseline">
+                                <h3 className="font-bold text-base">{data.applyingFor}</h3>
+                                <span className="text-xs font-bold text-black/40">{data.experienceYears} Years</span>
+                              </div>
+                              <p className="text-sm font-medium text-black/60">Professional Experience in {data.experienceCountry}</p>
+                            </div>
+                          </div>
+                        </section>
+
+                        <section className="space-y-6">
+                          <h2 className="text-lg font-bold uppercase tracking-widest border-b-2 border-black pb-1">Education</h2>
+                          <div className="space-y-6">
+                            {data.education.map((edu: Education) => (
+                              <div key={edu.id} className="space-y-1">
+                                <div className="flex justify-between items-baseline">
+                                  <h3 className="font-bold text-base">{edu.degree}</h3>
+                                  <span className="text-xs font-bold text-black/40">{edu.year}</span>
+                                </div>
+                                <p className="text-sm font-medium text-black/60">{edu.institution}</p>
+                              </div>
+                            ))}
+                            <div className="space-y-1">
+                              <h3 className="font-bold text-base">{data.educationLevel}</h3>
+                              <p className="text-sm font-medium text-black/60">Completed Secondary Education</p>
+                            </div>
+                          </div>
+                        </section>
+                      </div>
+                    </div>
+                  </div>
+                ) : data.template === 'minimalist' ? (
+                  <div className="bg-white text-black shadow-2xl rounded-none overflow-hidden max-w-[210mm] mx-auto min-h-[297mm] p-20 print:shadow-none print:p-12 print:m-0 space-y-12">
+                    <header className="flex justify-between items-start border-b-2 border-black pb-8">
+                      <div className="space-y-2">
+                        <h1 className="text-5xl font-light tracking-tighter">{data.fullName}</h1>
+                        <p className="text-xl text-black/40 font-medium tracking-tight">{data.applyingFor}</p>
+                      </div>
+                      <div className="text-right text-xs space-y-1 font-medium text-black/60">
+                        <p>{data.phone}</p>
+                        <p>{data.email}</p>
+                        <p>{data.address}</p>
+                      </div>
+                    </header>
+
+                    <section className="grid grid-cols-4 gap-8">
+                      <h2 className="col-span-1 text-xs font-bold uppercase tracking-[0.3em] text-black/30">Summary</h2>
+                      <p className="col-span-3 text-sm leading-relaxed">
+                        Experienced {data.applyingFor} with {data.experienceYears} years of background in {data.experienceCountry}.
+                        Focused on efficiency, quality, and professional growth.
+                      </p>
+                    </section>
+
+                    <section className="grid grid-cols-4 gap-8">
+                      <h2 className="col-span-1 text-xs font-bold uppercase tracking-[0.3em] text-black/30">Experience</h2>
+                      <div className="col-span-3 space-y-8">
+                        {data.experiences.map((exp: Experience) => (
+                          <div key={exp.id} className="space-y-1">
+                            <div className="flex justify-between items-baseline">
+                              <h3 className="font-bold text-lg">{exp.title}</h3>
+                              <span className="text-xs font-bold text-black/30">{exp.duration}</span>
+                            </div>
+                            <p className="text-sm text-black/60">{exp.company}, {exp.country}</p>
+                          </div>
+                        ))}
+                        <div className="space-y-1">
+                          <div className="flex justify-between items-baseline">
+                            <h3 className="font-bold text-lg">{data.applyingFor}</h3>
+                            <span className="text-xs font-bold text-black/30">{data.experienceYears} Years</span>
+                          </div>
+                          <p className="text-sm text-black/60">Professional Experience in {data.experienceCountry}</p>
+                        </div>
+                      </div>
+                    </section>
+
+                    <section className="grid grid-cols-4 gap-8">
+                      <h2 className="col-span-1 text-xs font-bold uppercase tracking-[0.3em] text-black/30">Education</h2>
+                      <div className="col-span-3 space-y-8">
+                        {data.education.map((edu: Education) => (
+                          <div key={edu.id} className="space-y-1">
+                            <div className="flex justify-between items-baseline">
+                              <h3 className="font-bold text-lg">{edu.degree}</h3>
+                              <span className="text-xs font-bold text-black/30">{edu.year}</span>
+                            </div>
+                            <p className="text-sm text-black/60">{edu.institution}</p>
+                          </div>
+                        ))}
+                        <div className="space-y-1">
+                          <h3 className="font-bold text-lg">{data.educationLevel}</h3>
+                          <p className="text-sm text-black/60">Completed Secondary Education</p>
+                        </div>
+                      </div>
+                    </section>
+
+                    <section className="grid grid-cols-4 gap-8">
+                      <h2 className="col-span-1 text-xs font-bold uppercase tracking-[0.3em] text-black/30">Details</h2>
+                      <div className="col-span-3 grid grid-cols-2 gap-y-4 gap-x-8 text-xs">
+                        <div className="flex justify-between border-b border-black/5 pb-1">
+                          <span className="text-black/30 font-bold uppercase">Nationality</span>
+                          <span className="font-bold">{data.nationality}</span>
+                        </div>
+                        <div className="flex justify-between border-b border-black/5 pb-1">
+                          <span className="text-black/30 font-bold uppercase">Passport</span>
+                          <span className="font-bold">{data.passportNumber}</span>
+                        </div>
+                        <div className="flex justify-between border-b border-black/5 pb-1">
+                          <span className="text-black/30 font-bold uppercase">DOB</span>
+                          <span className="font-bold">{data.dateOfBirth}</span>
+                        </div>
+                        <div className="flex justify-between border-b border-black/5 pb-1">
+                          <span className="text-black/30 font-bold uppercase">Marital</span>
+                          <span className="font-bold">{data.maritalStatus}</span>
+                        </div>
+                      </div>
+                    </section>
+                  </div>
+                ) : (
+                  <div className="bg-white text-black shadow-2xl rounded-none overflow-hidden max-w-[210mm] mx-auto min-h-[297mm] p-20 print:shadow-none print:p-12 print:m-0">
+                    <div className="text-center space-y-2 mb-12 border-b-4 border-black pb-8">
+                      <h1 className="text-4xl font-bold uppercase tracking-[0.2em]">Curriculum Vitae</h1>
+                      <div className="text-2xl font-bold uppercase tracking-widest text-black/60">
+                        {data.gender.toLowerCase().includes('female') ? 'MS.' : 'MR.'} {data.fullName}
+                      </div>
+                      <p className="text-xs font-bold uppercase tracking-[0.3em] text-black/40">ADDRESS: {data.address}</p>
                     </div>
 
-                    <section className="mb-8">
-                      <h2 className="text-lg font-bold uppercase border-b border-black mb-3">OBJECTIVE</h2>
-                      <p className="text-sm leading-relaxed whitespace-pre-line">
+                    <section className="mb-12">
+                      <h2 className="text-xl font-bold uppercase border-b-2 border-black mb-4 py-1 tracking-widest">OBJECTIVE</h2>
+                      <p className="text-sm leading-relaxed font-medium text-black/80">
                         Seeking a challenging position in a reputed organization to grow and
                         contribute meaningfully by utilizing my educational background and
                         experience for success of the organization.
                       </p>
                     </section>
 
-                    <section className="mb-8">
-                      <h2 className="text-lg font-bold uppercase border-b border-black mb-3">PERSONAL DETAILS</h2>
-                      <div className="grid grid-cols-1 gap-2 text-sm">
-                        <div className="grid grid-cols-2"><span className="font-bold">Full Name</span> <span>: {data.fullName}</span></div>
-                        <div className="grid grid-cols-2"><span className="font-bold">Date of Birth</span> <span>: {data.dateOfBirth}</span></div>
-                        <div className="grid grid-cols-2"><span className="font-bold">Nationality</span> <span>: {data.nationality}</span></div>
-                        <div className="grid grid-cols-2"><span className="font-bold">Gender</span> <span>: {data.gender}</span></div>
-                        <div className="grid grid-cols-2"><span className="font-bold">Height</span> <span>: {data.height}</span></div>
-                        <div className="grid grid-cols-2"><span className="font-bold">Weight</span> <span>: {data.weight}</span></div>
-                        <div className="grid grid-cols-2"><span className="font-bold">Language</span> <span>: {data.languages}</span></div>
-                        <div className="grid grid-cols-2"><span className="font-bold">Education</span> <span>: {data.educationLevel} PASSED</span></div>
-                      </div>
-                    </section>
-
-                    <section className="mb-8">
-                      <h2 className="text-lg font-bold uppercase border-b border-black mb-3">PASSPORT DETAILS</h2>
-                      <div className="grid grid-cols-1 gap-2 text-sm">
-                        <div className="grid grid-cols-2"><span className="font-bold">Passport No</span> <span>: {data.passportNumber}</span></div>
-                        <div className="grid grid-cols-2"><span className="font-bold">Date of issue</span> <span>: {data.dateOfIssue}</span></div>
-                        <div className="grid grid-cols-2"><span className="font-bold">Date of expiry</span> <span>: {data.dateOfExpiry}</span></div>
-                        <div className="grid grid-cols-2"><span className="font-bold">Place of issue</span> <span>: {data.placeOfIssue}</span></div>
+                    <section className="mb-12">
+                      <h2 className="text-xl font-bold uppercase border-b-2 border-black mb-4 py-1 tracking-widest">PERSONAL DETAILS</h2>
+                      <div className="grid grid-cols-1 gap-4 text-sm">
+                        <div className="grid grid-cols-2 border-b border-black/5 pb-2"><span className="font-bold uppercase text-[10px] tracking-widest text-black/40">Full Name</span> <span className="font-bold">: {data.fullName}</span></div>
+                        <div className="grid grid-cols-2 border-b border-black/5 pb-2"><span className="font-bold uppercase text-[10px] tracking-widest text-black/40">Date of Birth</span> <span className="font-bold">: {data.dateOfBirth}</span></div>
+                        <div className="grid grid-cols-2 border-b border-black/5 pb-2"><span className="font-bold uppercase text-[10px] tracking-widest text-black/40">Nationality</span> <span className="font-bold">: {data.nationality}</span></div>
+                        <div className="grid grid-cols-2 border-b border-black/5 pb-2"><span className="font-bold uppercase text-[10px] tracking-widest text-black/40">Gender</span> <span className="font-bold">: {data.gender}</span></div>
+                        <div className="grid grid-cols-2 border-b border-black/5 pb-2"><span className="font-bold uppercase text-[10px] tracking-widest text-black/40">Height / Weight</span> <span className="font-bold">: {data.height} / {data.weight}</span></div>
+                        <div className="grid grid-cols-2 border-b border-black/5 pb-2"><span className="font-bold uppercase text-[10px] tracking-widest text-black/40">Marital Status</span> <span className="font-bold">: {data.maritalStatus}</span></div>
+                        <div className="grid grid-cols-2 border-b border-black/5 pb-2"><span className="font-bold uppercase text-[10px] tracking-widest text-black/40">Religion</span> <span className="font-bold">: {data.religion}</span></div>
+                        <div className="grid grid-cols-2 border-b border-black/5 pb-2"><span className="font-bold uppercase text-[10px] tracking-widest text-black/40">Father&apos;s Name</span> <span className="font-bold">: {data.fatherName}</span></div>
+                        <div className="grid grid-cols-2 border-b border-black/5 pb-2"><span className="font-bold uppercase text-[10px] tracking-widest text-black/40">Language</span> <span className="font-bold">: {data.languages}</span></div>
+                        <div className="grid grid-cols-2 border-b border-black/5 pb-2"><span className="font-bold uppercase text-[10px] tracking-widest text-black/40">Education</span> <span className="font-bold">: {data.educationLevel} PASSED</span></div>
                       </div>
                     </section>
 
                     <section className="mb-12">
-                      <h2 className="text-lg font-bold uppercase border-b border-black mb-3">EXPERIENCE</h2>
-                      <div className="space-y-2 text-sm">
-                        <p>1. Worked as a {data.applyingFor.toUpperCase()} in {data.experienceCountry.toUpperCase()} For {data.experienceYears.padStart(2, '0')} Years.</p>
-                        {data.experiences.map((exp, i) => (
-                          <p key={exp.id}>{i + 2}. Worked as a {exp.title.toUpperCase()} in {exp.country.toUpperCase()} For {exp.duration}.</p>
+                      <h2 className="text-xl font-bold uppercase border-b-2 border-black mb-4 py-1 tracking-widest">PASSPORT DETAILS</h2>
+                      <div className="grid grid-cols-1 gap-4 text-sm">
+                        <div className="grid grid-cols-2 border-b border-black/5 pb-2"><span className="font-bold uppercase text-[10px] tracking-widest text-black/40">Passport No</span> <span className="font-bold">: {data.passportNumber}</span></div>
+                        <div className="grid grid-cols-2 border-b border-black/5 pb-2"><span className="font-bold uppercase text-[10px] tracking-widest text-black/40">Date of issue</span> <span className="font-bold">: {data.dateOfIssue}</span></div>
+                        <div className="grid grid-cols-2 border-b border-black/5 pb-2"><span className="font-bold uppercase text-[10px] tracking-widest text-black/40">Date of expiry</span> <span className="font-bold">: {data.dateOfExpiry}</span></div>
+                        <div className="grid grid-cols-2 border-b border-black/5 pb-2"><span className="font-bold uppercase text-[10px] tracking-widest text-black/40">Place of issue</span> <span className="font-bold">: {data.placeOfIssue}</span></div>
+                      </div>
+                    </section>
+
+                    <section className="mb-12">
+                      <h2 className="text-xl font-bold uppercase border-b-2 border-black mb-4 py-1 tracking-widest">EXPERIENCE</h2>
+                      <div className="space-y-4 text-sm font-medium">
+                        <p className="flex items-start gap-4">
+                          <span className="bg-black text-white px-2 py-0.5 text-[10px] font-bold">01</span>
+                          <span>Worked as a {data.applyingFor.toUpperCase()} in {data.experienceCountry.toUpperCase()} for {data.experienceYears.padStart(2, '0')} years.</span>
+                        </p>
+                        {data.experiences.map((exp: Experience, i: number) => (
+                          <p key={exp.id} className="flex items-start gap-4">
+                            <span className="bg-black text-white px-2 py-0.5 text-[10px] font-bold">{(i + 2).toString().padStart(2, '0')}</span>
+                            <span>Worked as a {exp.title.toUpperCase()} in {exp.country.toUpperCase()} for {exp.duration}.</span>
+                          </p>
                         ))}
                       </div>
                     </section>
 
-                    <div className="mt-16 text-sm italic border-t border-black pt-4">
+                    <div className="mt-20 text-xs italic border-t-2 border-black pt-6 text-center tracking-widest uppercase font-bold text-black/40">
                       <p>I hereby declare that the above information provided by me is true to the best of my knowledge and belief.</p>
                     </div>
                   </div>
                 )}
 
-                {/* Page 2: Documents */}
-                <div className="bg-white text-black shadow-2xl rounded-none overflow-hidden max-w-[210mm] mx-auto min-h-[297mm] p-12 print:shadow-none print:rounded-none print:p-0 print:break-before-page">
-                  <div className="space-y-12">
-                    {data.passportImage && (
-                      <div className="space-y-4">
-                        <img src={data.passportImage} alt="Passport" className="w-full rounded-none border-none shadow-none" referrerPolicy="no-referrer" />
-                      </div>
-                    )}
-
-                    {data.certificates.length > 0 && (
-                      <div className="space-y-6 p-12 print:p-8">
-                        <h4 className="text-xs font-bold uppercase tracking-widest text-[#5A5A40] no-print">Certificates & Other Documents</h4>
-                        <div className="grid grid-cols-2 gap-8">
-                          {data.certificates.map(cert => (
-                            <div key={cert.id} className="space-y-2">
-                              <img src={cert.url} alt={cert.name} className="w-full aspect-[4/3] object-cover rounded-xl border border-black/5 shadow-sm" referrerPolicy="no-referrer" />
-                              <p className="text-xs text-center text-black/40 font-medium">{cert.name}</p>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
+                {/* Page 2: Passport Copy */}
+                {data.passportImage && (
+                  <div className="bg-white text-black shadow-2xl rounded-none overflow-hidden max-w-[210mm] mx-auto min-h-[297mm] flex flex-col items-center justify-center p-0 print:shadow-none print:m-0 print:break-before-page">
+                    <div className="w-full h-full flex items-center justify-center p-8">
+                      <img src={data.passportImage} alt="Passport Copy" className="max-w-full max-h-full object-contain shadow-2xl" referrerPolicy="no-referrer" />
+                    </div>
                   </div>
-                </div>
+                )}
+
+                {/* Page 3: Profile Picture (Full Page) */}
+                {data.profilePhoto && (
+                  <div className="bg-white text-black shadow-2xl rounded-none overflow-hidden max-w-[210mm] mx-auto min-h-[297mm] flex flex-col items-center justify-center p-0 print:shadow-none print:m-0 print:break-before-page">
+                    <div className="w-full h-full flex items-center justify-center p-20">
+                      <div className="relative w-full aspect-[3/4] max-w-[160mm]">
+                        <div className="absolute -inset-4 border-8 border-black/5"></div>
+                        <img src={data.profilePhoto} alt="Full Profile" className="relative w-full h-full object-cover shadow-2xl grayscale" referrerPolicy="no-referrer" />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Page 4+: Certificates (Each on separate page) */}
+                {data.certificates.map((cert: { id: string; url: string; name: string }, index: number) => (
+                  <div key={cert.id} className="bg-white text-black shadow-2xl rounded-none overflow-hidden max-w-[210mm] mx-auto min-h-[297mm] flex flex-col items-center justify-center p-0 print:shadow-none print:m-0 print:break-before-page">
+                    <div className="w-full h-full flex flex-col items-center justify-center p-12">
+                      <div className="flex-1 w-full flex items-center justify-center">
+                        <img src={cert.url} alt={cert.name} className="max-w-full max-h-[260mm] object-contain shadow-2xl border-4 border-white" referrerPolicy="no-referrer" />
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             </motion.div>
           )}
@@ -1046,13 +1283,13 @@ function Select({ label, value, onChange, options }: { label: string; value: str
         onChange={e => onChange(e.target.value)}
         className="w-full bg-card border border-border rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all appearance-none"
       >
-        {options.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+        {options.map((opt: { label: string; value: string }) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
       </select>
     </div>
   );
 }
 
-function TemplatePreview({ type, active }: { type: 'elegant' | 'professional' | 'classic'; active: boolean }) {
+function TemplatePreview({ type, active }: { type: 'elegant' | 'professional' | 'classic' | 'modern_classic' | 'minimalist'; active: boolean }) {
   const baseClasses = cn(
     "w-full aspect-[3/4] rounded-xl border-2 mb-3 overflow-hidden transition-all duration-300 relative group",
     active ? "border-primary shadow-lg scale-[1.02] ring-4 ring-primary/10" : "border-border hover:border-primary/30"
@@ -1133,6 +1370,41 @@ function TemplatePreview({ type, active }: { type: 'elegant' | 'professional' | 
               <div className="h-1 w-full bg-muted/20" />
               <div className="h-1 w-full bg-muted/20" />
             </div>
+          </div>
+        </div>
+      )}
+
+      {type === 'modern_classic' && (
+        <div className="h-full bg-white flex">
+          <div className="w-1/3 bg-muted/10 p-2 space-y-2">
+            <div className="w-full aspect-square bg-muted/30 rounded-full" />
+            <div className="h-1 w-full bg-muted/40" />
+            <div className="h-1 w-full bg-muted/20" />
+          </div>
+          <div className="flex-1 p-3 space-y-3">
+            <div className="h-2 w-1/2 bg-muted/40" />
+            <div className="h-1 w-3/4 bg-muted/20" />
+            <div className="space-y-1">
+              <div className="h-1 w-full bg-muted/10" />
+              <div className="h-1 w-full bg-muted/10" />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {type === 'minimalist' && (
+        <div className="h-full bg-white p-4 space-y-6">
+          <div className="flex justify-between items-start border-b border-muted/20 pb-2">
+            <div className="h-3 w-20 bg-muted/40" />
+            <div className="h-1 w-12 bg-muted/20" />
+          </div>
+          <div className="grid grid-cols-4 gap-2">
+            <div className="h-1 w-full bg-muted/20" />
+            <div className="col-span-3 h-1 w-full bg-muted/10" />
+          </div>
+          <div className="grid grid-cols-4 gap-2">
+            <div className="h-1 w-full bg-muted/20" />
+            <div className="col-span-3 h-1 w-full bg-muted/10" />
           </div>
         </div>
       )}
