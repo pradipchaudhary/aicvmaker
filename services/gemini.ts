@@ -5,7 +5,7 @@ let aiInstance: GoogleGenAI | null = null;
 
 function getAI() {
   if (!aiInstance) {
-    const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
+    const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       console.warn("NEXT_PUBLIC_GEMINI_API_KEY is not set. Please ensure it's available in the environment.");
     }
